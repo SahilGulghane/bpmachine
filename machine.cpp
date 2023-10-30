@@ -1,28 +1,30 @@
-#include <SPI.h>
 #include <Wire.h>
 #include <Adafruit_MPU6050.h>
-#include <Q2HX711.h>
+#include <Adafruit_Sensor.h>
 
 // Define the pins that the motor driver, pressure valve, and switch are connected to
 const int motorDriverPin1 = 32;
 const int motorDriverPin2 = 33;
 const int pressureValvePin = 18;
-const int switchPin = 19;
+const int switchPin = 25;
+
+// Define the pressure sensor calibration parameters
+const float pressureSensorOffset = 100.0;
+const float pressureSensorScaleFactor = 1.0;
 
 // Define the Korotkoff algorithm parameters
 const int korotkoffThreshold = 5; // The minimum difference in pressure sensor readings to be considered a Korotkoff sound
-const int korotkoffCount = 5; // The number of Korotkoff sounds to detect
+const int korotkoffCountThreshold = 5; // The number of Korotkoff sounds to detect
 
-// Define the pump state variable
-int pumpState = OFF;
+// Define the pump states
+const int OFF = 0;
+const int ON = 1;
 
 // Create an instance of the Adafruit_MPU6050 class
 Adafruit_MPU6050 mpu;
 
-// Define the pins for the Q2HX711 sensor
-const byte MPS_OUT_pin = 35; // OUT data pin
-const byte MPS_SCK_pin = 34; // clock data pin
-Q2HX711 pressureSensor(MPS_OUT_pin, MPS_SCK_pin); // start communication with the HX711
+// Define the pins for the pressure sensor
+const int pressureSensorOutputPin = A0; // Assuming the pressure sensor is connected to analog pin A0
 
 void setup() {
   // Initialize the serial port
@@ -40,53 +42,49 @@ void setup() {
 
   // Set the switch pin to input mode
   pinMode(switchPin, INPUT);
-  
-  // Initialize the Q2HX711 sensor
-  pressureSensor.begin();
 }
 
 void loop() {
   // Read the switch state
   int switchState = digitalRead(switchPin);
 
-  // If the switch is ON, turn on the pump
   if (switchState == HIGH) {
+    // If the switch is ON, turn on the pump
+    pumpState = ON;
     digitalWrite(motorDriverPin1, HIGH);
     digitalWrite(motorDriverPin2, LOW);
   } else {
-    // Turn off the pump
+    // If the switch is OFF, turn off the pump
+    pumpState = OFF;
     digitalWrite(motorDriverPin1, LOW);
     digitalWrite(motorDriverPin2, HIGH);
   }
 
   // Read the pressure sensor data
-  long pressure = pressureSensor.read(); // Read pressure sensor data
+  int pressure = analogRead(pressureSensorOutputPin);
+  float pressureValue = pressure * pressureSensorScaleFactor + pressureSensorOffset;
 
   // Calculate the systolic and diastolic blood pressure using the Korotkoff algorithm
   int systolicPressure = 0;
   int diastolicPressure = 0;
   int korotkoffCount = 0;
-  long previousPressure = pressure;
+  int previousPressure = pressure;
 
   // Detect the Korotkoff sounds
-  while (pressure > korotkoffThreshold) {
-    if (pressure < systolicPressure) {
-      systolicPressure = pressure;
-    }
-
-    if (korotkoffCount == korotkoffCount) {
-      diastolicPressure = pressure;
-      break;
-    }
-
-    if (pressure - previousPressure > korotkoffThreshold) {
+  while (korotkoffCount < korotkoffCountThreshold) {
+    if (abs(pressure - previousPressure) > korotkoffThreshold) {
       korotkoffCount++;
+      if (korotkoffCount == 1) {
+        systolicPressure = pressureValue;
+      }
     }
 
-    // Read the pressure sensor data
     previousPressure = pressure;
-    pressure = pressureSensor.read();
+    pressure = analogRead(pressureSensorOutputPin);
+    pressureValue = pressure * pressureSensorScaleFactor + pressureSensorOffset;
   }
+
+  diastolicPressure = pressureValue;
 
   // Display the systolic and diastolic blood pressure readings on the serial port
   Serial.print("Systolic pressure: ");
